@@ -1,3 +1,98 @@
+var Schedulers = {
+    'FIFO': function () {
+        // the simulation requires these properties scheduler properties
+        this.clock = 0; // counts calls to the schedule function
+        this.processes = []; // list of processes
+        this.active = null; // active process
+        this.isFinished = function () { return this.processes.length === 0; }
+    
+        this.enqueue = function (proc) {
+            this.processes.push(proc);
+        }
+
+    
+        this.schedule = function() {
+            ++this.clock;
+            if (this.isFinished()) return;
+
+            this.active = this.processes[0];
+            this.active.step();
+            if (this.active.isFinished()) { // if finished remove from queue
+                this.processes.splice(this.processes.indexOf(this.active),1);
+            }
+        }
+    },
+
+    'RR': function () {
+        // the simulation requires these properties scheduler properties
+        this.clock = 0; // counts calls to the schedule function
+        this.processes = []; // list of processes
+        this.active = null; // active process
+        this.isFinished = function () { return this.processes.length === 0; }
+    
+        this.currIndex = 0; // current task for RR
+
+        this.enqueue = function (proc) {
+            this.processes.push(proc);
+        };
+    
+        this.schedule = function() {
+            ++this.clock;
+            if (this.isFinished()) return;
+           
+            // simply increment the index
+            this.currIndex = ++this.currIndex % this.processes.length;
+
+            this.active = this.processes[this.currIndex]; 
+            this.active.step(); 
+            if (this.active.isFinished()) { 
+                this.processes.splice(this.processes.indexOf(this.active),1);
+            }
+        };
+    },
+
+    'FAIR': function() {
+        // the simulation requires these properties scheduler properties
+        this.clock = 0; // counts calls to the schedule function
+        this.processes = []; // list of processes
+        this.active = null; // active process
+        this.isFinished = function () { return this.processes.length === 0; }
+    
+        this.mintime = 0;
+
+        this.enqueue = function (proc) {
+            // set new processes vruntime to the minimum runtime in the queue,
+            // this makes sure that the new process is run next (or at least very sonn
+            // if there are duplicate vruntimes...)
+            proc.time = this.mintime;
+            this.processes.push(proc);
+        };
+
+        this.schedule = function() {
+            ++this.clock;
+            if (this.isFinished()) return; 
+
+            // find the process with the smallest vruntime (O(n))
+            var nextprocess = this.processes[0];
+            for (var i = 1; i < this.processes.length; ++i) {
+                if (this.processes[i].time < nextprocess.time)
+                    nextprocess = this.processes[i];
+            }
+            // update the schedulers vruntime
+            this.minvruntime = nextprocess.time;
+
+            // run process 
+            nextprocess.step();
+
+            this.active = nextprocess;
+            if (this.active.isFinished()) { 
+                this.processes.splice(this.processes.indexOf(this.active),1);
+            }
+        };
+    }
+}
+
+
 // wraps the specified values in the specifed markup tags and returns the resulting string
 // values: array of values
 // element: markup element string ('td')
@@ -18,17 +113,19 @@ function Quantum() {
 
 // specifies a process in the simulation
 // pid: the process id for the new process.
-function Process(pid) {
+function Process(pid, numQuanta) {
     this.pid = pid; // uniqued process id
     this.ip = 0; // 'instruction pointer' indexes into qunta
     this.time = 0; // virtual time consumed by this process (quantas executed)
+    this.state = 'READY'; // possible states: 'RUNNING', 'READY', 'BLOCKED'
 
     // the process is finished when the instruction pointer points after the last quantum.
     this.isFinished = function () { return this.ip === this.quanta.length; }
 
     // the list of quantas
     this.quanta = [];
-    for (var i = 0; i < Math.random()*10; ++i) {
+    numQuanta = numQuanta < 0 ? Math.random()*10 : numQuanta;
+    for (var i = 0; i < numQuanta; ++i) {
         this.quanta.push(new Quantum());
     }
 
@@ -43,80 +140,43 @@ function Process(pid) {
 }
 
 // the scheduler handles all processes and decides execution order.
-function FifoScheduler () {
+function Scheduler () {
+    this.clock = 0;
     this.processes = [];
     this.lastpid = 0;
     this.activeProcess = null;
 
     this.isFinished = function () { return this.processes.length === 0; }
 
-    // creates a new process.
-    this.spawnProcess = function () {
-        this.processes.push(new Process(++this.lastpid));
-    };
-
-    // fifo step
-    this.step = function () {
-        if (this.isFinished()) return;
-
-        this.activeProcess = this.processes[0];
-        this.activeProcess.step();
-        if (this.activeProcess.isFinished()) {
-            this.processes.shift();
-        }
-    };
-}
-
-function EdfScheduler() {
-    this.clock = 0;
-    this.processes = [];
-    this.lastpid = 0;
-    this. activeProcess = null;
-    this.isFinished = function () { return this.processes.length === 0; }
+    // queues a process for execution
+    this.enqueue = function (proc) { };
 
 
-    // creates a new process.
-    this.spawnProcess = function () {
-        var proc = new Process(++this.lastpid);
-        proc.deadline = this.clock + proc.i
-        this.processes.push();
-    };
-
-    // fifo step
-    this.step = function () {
-        if (this.isFinished()) return;
-
-        this.activeProcess = this.processes[0];
-        this.activeProcess.step();
-        if (this.activeProcess.isFinished()) {
-            this.processes.shift();
-        }
-    };
+    this.schedule = function () {  };
 }
 
 
 
 var TheSys =
 {
-    scheduler: new FifoScheduler(),
+    scheduler: new Scheduler(),
 
-    // prints/udpates the process table
-    printOverview: function () {
+    updateui: function () {
+        // update clock
+        $("#clock").val(this.scheduler.clock); 
+
+        // update process table
         $("#processes > tbody").empty(); // clear all rows
 
         // populate table
         var processes = this.scheduler.processes;
         for (var i = 0; i < processes.length; ++i) {
             var p = processes[i];
-            var cells = wrapInTags([p.pid, p.time, p.ip, p.quanta.length], 'td');
-            var cssclass = p === this.scheduler.activeProcess ? 'active' : ''
+            var cells = wrapInTags([p.pid, p.time, p.ip, p.quanta.length, p.deadline], 'td');
+            var cssclass = p === this.scheduler.active ? 'active' : ''
 
             $('#processes > tbody').append('<tr class="' + cssclass + '">' + cells + '</tr>');
         }
-    },
-
-    updateui: function () {
-        this.printOverview();
     },
 
     start: function () {
@@ -138,28 +198,38 @@ var TheSys =
     },
 
     step: function () {
-        this.scheduler.step();
+        this.scheduler.schedule();
         this.updateui();
     },
 
-    main: function () {
-
-        this.spawnEditor = new FunctionEditor("spawnEditor", "spawnError");
-        this.schedEditor = new FunctionEditor("schedEditor", "schedError");
-        this.scheduler.spawnProcess = this.spawnEditor.getFunction();
-        this.scheduler.step = this.schedEditor.getFunction();
+    changestrategy: function() {
+        var strategy = $("#strategy")[0].value;
+        this.scheduler = new Schedulers[strategy];
 
     },
 
+    main: function () {
+        this.spawnEditor = new FunctionEditor("spawnEditor", "spawnError");
+        this.schedEditor = new FunctionEditor("schedEditor", "schedError");
+
+        this.changestrategy();
+    },
+
+    lastpid: 0,
     spawn: function () {
-        //this.scheduler.spawnProcess = this.spawnEditor.getFunction();
-        //this.scheduler.step = this.schedEditor.getFunction();
         
         var numProcesses = parseInt($("#numProcesses").val());
+        var numQuanta = parseInt($("#numQuanta").val());
+        var deadline = parseInt($("#deadline").val());
 
         // spawn processes
         for (var i = 0; i < numProcesses; i++) {
-            this.scheduler.spawnProcess(Math.random()*100);
+            var proc = new Process(++this.lastpid, numQuanta);
+            if (deadline < 0)
+                proc.deadline = this.scheduler.clock + Math.floor(Math.random() * 100);
+            else
+                proc.deadline = this.scheduler.clock + deadline;
+            this.scheduler.enqueue(proc);
         }
 
         this.updateui();
