@@ -22,7 +22,6 @@
         td.expired { background-color: red; }
     </style>
 
-
     <script type="text/javascript" src="jquery.js"></script>
     <script type="text/javascript" src="System.js"></script>
 
@@ -41,7 +40,7 @@
     <p>Clock: <input type="number" id="clock" disabled/></p>
 
     <p>
-        Speed: <input type="number" id="speed" min="1" style="width:50px" value="50"/>
+        Speed: <input type="number" id="speed" min="1" style="width:50px" value="5"/>
         <input type="submit" value="Step" onclick="TheSys.step()" />
         <input type="submit" value="Start" id="bu_start" onclick="TheSys.start()" />
         <input type="submit" value="Pause" id="bu_pause" disabled onclick="TheSys.pause()" />
@@ -51,10 +50,10 @@
         Count: <input type="number" id="numProcesses" value="10"/>
     </p>
     <p>
-        Quanta: <input type="number" id="numQuanta" value="10"/> (<0: random)
+        Quanta: <input type="number" id="numQuanta" value="10"/> (<0: infinity)
     </p>
     <p>
-        Deadline (EDF): <input type="number" id="deadline" value="10"/> (<0: random)
+        CPU Utilisation: <input type="number" id="cpuutil" min="0" max="1" value="0.1"/> [0(always sleep),1(never sleep)]
     </p>
     <input type="submit" value="Spawn" onclick='TheSys.spawn()' />
 </div>
@@ -65,9 +64,9 @@
             <tr>
                 <th>pid</th>
                 <th>virtual time</th>
-                <th>ip</th>
                 <th>quanta</th>
-                <th>deadline</th>
+                <th>state</th>
+                <th>cpu util</th>
             </tr>
         </thead>
         <tbody>
