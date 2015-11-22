@@ -1,11 +1,3 @@
-// busy wait for the specified duration.
-// ms: milliseconds to wait
-function wait(ms) {
-    var start = Date.now();
-    while (Date.now() - start < ms) { };
-}
-
-
 // wraps the specified values in the specifed markup tags and returns the resulting string
 // values: array of values
 // element: markup element string ('td')
@@ -17,50 +9,77 @@ function wrapInTags(values, element) {
     return result;
 }
 
-// models a single instruction for the cpu.
-function Instruction() {
-
+// models a single quantum for the cpu.
+// this is the atomic unit used to build the process.
+function Quantum() {
     // execute the instruction
     this.execute = function () { };
 }
 
 // specifies a process in the simulation
 // pid: the process id for the new process.
-// numInstructions: number of instructions to generate for this process.
-function Process(pid, numInstructions) {
+function Process(pid) {
     this.pid = pid; // uniqued process id
-    this.ip = 0; // 'instruction pointer' indexes into instructions
-    this.time = 0; // virtual time consumed by this process
+    this.ip = 0; // 'instruction pointer' indexes into qunta
+    this.time = 0; // virtual time consumed by this process (quantas executed)
 
-    // the process is finished when the instruction pointer points after the last instruction.
-    this.isFinished = function () { return this.ip == this.instructions.length; }
+    // the process is finished when the instruction pointer points after the last quantum.
+    this.isFinished = function () { return this.ip === this.quanta.length; }
 
-    // the list of instructions
-    this.instructions = [];
-    for (var i = 0; i < numInstructions; ++i) {
-        this.instructions.push(new Instruction());
+    // the list of quantas
+    this.quanta = [];
+    for (var i = 0; i < Math.random()*10; ++i) {
+        this.quanta.push(new Quantum());
     }
 
-    // executes the next instruction
-    // each instruction is 'atomic'. preempting the process is only possible between
+    // executes the next quantum
+    // each quantum is 'atomic'. preempting the process is only possible between
     // steps.
     this.step = function () {
-        this.instructions[this.ip++].execute();
-        this.time += 1;
+        if (this.isFinished()) return;
+        this.quanta[this.ip++].execute();
+        ++this.time;
     }
 }
 
 // the scheduler handles all processes and decides execution order.
-function Scheduler () {
+function FifoScheduler () {
     this.processes = [];
     this.lastpid = 0;
     this.activeProcess = null;
 
-    this.isFinished = function () { return this.processes.length == 0; }
+    this.isFinished = function () { return this.processes.length === 0; }
 
     // creates a new process.
-    this.spawnProcess = function (numInstructions) {
-        this.processes.push(new Process(++this.lastpid, numInstructions));
+    this.spawnProcess = function () {
+        this.processes.push(new Process(++this.lastpid));
+    };
+
+    // fifo step
+    this.step = function () {
+        if (this.isFinished()) return;
+
+        this.activeProcess = this.processes[0];
+        this.activeProcess.step();
+        if (this.activeProcess.isFinished()) {
+            this.processes.shift();
+        }
+    };
+}
+
+function EdfScheduler() {
+    this.clock = 0;
+    this.processes = [];
+    this.lastpid = 0;
+    this. activeProcess = null;
+    this.isFinished = function () { return this.processes.length === 0; }
+
+
+    // creates a new process.
+    this.spawnProcess = function () {
+        var proc = new Process(++this.lastpid);
+        proc.deadline = this.clock + proc.i
+        this.processes.push();
     };
 
     // fifo step
@@ -79,8 +98,7 @@ function Scheduler () {
 
 var TheSys =
 {
-    scheduler: new Scheduler(),
-
+    scheduler: new FifoScheduler(),
 
     // prints/udpates the process table
     printOverview: function () {
@@ -90,62 +108,85 @@ var TheSys =
         var processes = this.scheduler.processes;
         for (var i = 0; i < processes.length; ++i) {
             var p = processes[i];
-            var cells = wrapInTags([p.pid, p.time, p.ip, p.instructions.length], 'td');
+            var cells = wrapInTags([p.pid, p.time, p.ip, p.quanta.length], 'td');
             var cssclass = p === this.scheduler.activeProcess ? 'active' : ''
 
             $('#processes > tbody').append('<tr class="' + cssclass + '">' + cells + '</tr>');
         }
     },
 
-    updateui: function (continuation) {
+    updateui: function () {
         this.printOverview();
-
-        window.setTimeout(continuation, 0);
     },
 
-    run: function (done) {
+    start: function () {
+        if (this.scheduler.isFinished()) {
+            return;
+        }
+
+        var speed = parseInt($("#speed").val());
+        $("#bu_pause")[0].disabled = false;
+        $("#bu_start")[0].disabled = true;
+        this.interval = window.setInterval(() => this.step(), 1000 / speed);
+    },
+
+    pause: function() {
+       $("#bu_pause")[0].disabled = true;
+       $("#bu_start")[0].disabled = false;
+       window.clearInterval(this.interval);
+       this.updateui();
+    },
+
+    step: function () {
         this.scheduler.step();
         this.updateui();
-        var frequency = parseInt($("#frequency").val());
-        window.setTimeout(() => this.run(done), 1000 / frequency);
     },
 
     main: function () {
-        var numProcesses = 5;
 
+        this.spawnEditor = new FunctionEditor("spawnEditor", "spawnError");
+        this.schedEditor = new FunctionEditor("schedEditor", "schedError");
+        this.scheduler.spawnProcess = this.spawnEditor.getFunction();
+        this.scheduler.step = this.schedEditor.getFunction();
 
-        // spawn processes
-        for (var i = 0; i < numProcesses; i++) {
-            this.scheduler.spawnProcess(5);
-        }
-
-        var physicalTime = Date.now();
-
-        this.run(function () {
-            physicalTime = Date.now() - physicalTime;
-
-            console.log('Physical: ' + physicalTime);
-
-
-        });
     },
 
     spawn: function () {
+        //this.scheduler.spawnProcess = this.spawnEditor.getFunction();
+        //this.scheduler.step = this.schedEditor.getFunction();
+        
         var numProcesses = parseInt($("#numProcesses").val());
-        var numInstructions = parseInt($("#numInstructions").val());
 
         // spawn processes
         for (var i = 0; i < numProcesses; i++) {
-            this.scheduler.spawnProcess(numInstructions);
+            this.scheduler.spawnProcess(Math.random()*100);
         }
+
+        this.updateui();
     }
 }
 
-function FunctionEditor(element)  {
+function FunctionEditor(element, errorElement)  {
     this.editor = ace.edit(element);
     this.editor.setTheme("ace/theme/chrome");
     this.editor.getSession().setMode("ace/mode/javascript");
+    this.errorElement = ($("#"+errorElement));
 
-    
+    this.lastRunning = null;
+
+    this.getFunction = function() {
+        var source = this.editor.getValue();
+
+        try {
+            var f = new Function(source);
+            this.lastRunning = f;
+            this.errorElement.text('Ok!')
+        } 
+        catch (ex) {
+            this.errorElement.text(ex);
+        }
+
+        return this.lastRunning;
+    }
 
 }

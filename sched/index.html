@@ -4,7 +4,6 @@
     <style>
         html * 
         { 
-        font-family: sans-serif; 
         font-size: 1em;
         }
 
@@ -14,6 +13,9 @@
         font-size: 0.9em;
         padding: 0.3em;
         }
+
+        div#spawnEditor { width:100%; height:250px; }
+        div#schedEditor { width:100%; height:250px; }
 
         table { border-collapse: collapse;}
         tr.active { background-color: lightgreen; }
@@ -26,35 +28,78 @@
 </head>
 <body>
 <div>
-<h2> Settings </h2>
-    <p>Frequency: <input type="number" id="frequency" min="1" max="1000" value="50"/></p>
+<h2> Control </h2>
+    <p>
+        Speed: <input type="number" id="speed" min="1" style="width:50px" value="50"/>
+        <input type="submit" value="Step" onclick="TheSys.step()" />
+        <input type="submit" value="Start" id="bu_start" onclick="TheSys.start()" />
+        <input type="submit" value="Pause" id="bu_pause" disabled onclick="TheSys.pause()" />
+    </p>
+    <h2>Spawn Processes</h2>
+    <p>
+        Count: <input type="number" id="numProcesses" value="10"/>
+    </p>
+    <p>
+        Quanta: <input type="number" id="numQuanta" value="10"/> (<0: random)
+    </p>
+    <p>
+        Deadline (EDF): <input type="number" id="deadline" value="10"/> (<0: random)
+    </p>
+    <input type="submit" value="Spawn" onclick='TheSys.spawn()' />
 </div>
 <div>
-<h2>Processes</h2>
-<table id="processes">
-    <thead>
-        <tr>
-            <th>pid</th>
-            <th>virtual time</th>
-            <th>instruction pointer</th>
-            <th>instructions</th>
-        </tr>
-    </thead>
-    <tbody>
-    </tbody>
-</table>
+    <h2>Processes</h2>
+    <table id="processes">
+        <thead>
+            <tr>
+                <th>pid</th>
+                <th>virtual time</th>
+                <th>ip</th>
+                <th>quanta</th>
+            </tr>
+        </thead>
+        <tbody>
+        </tbody>
+    </table>
 </div>
-<div>
-    <h2>Spawn</h2>
-    <p>count: <input type="number" id="numProcesses"/></p>
-    <p>instructions per process: <input type="number" id="numInstructions"/></p>
-    <input type="submit" onclick='TheSys.spawn()' />
+
+<p> function spawnProcess()</p>
+<p id="spawnError">Ok!</p>
+<div id="spawnEditor">
+this.processes.push(new Process(++this.lastpid));
 </div>
-<div id="editor">
+
+<p> function schedule() </p>
+<p id="schedError">Ok!</p>
+<div id="schedEditor">
+if (this.isFinished()) return;
+
+this.activeProcess = this.processes[0];
+this.activeProcess.step();
+if (this.activeProcess.isFinished()) {
+    this.processes.shift();
+}
 </div>
-    <script src="ace/ace.js" type="text/javascript"></script>
-    <script>
-        TheSys.main();
-    </script>
+
+<p>
+if (this.isFinished()) return;
+
+if (this.currentIndex == 'undefined' || isNaN(this.currentIndex))
+    this.currentIndex = 0;
+else
+    this.currentIndex = ++this.currentIndex % this.processes.length
+    
+this.activeProcess = this.processes[this.currentIndex];
+this.activeProcess.step();
+if (this.activeProcess.isFinished()) {
+    this.processes.shift();
+}
+
+</p>
+
+<script src="ace/ace.js" type="text/javascript"></script>
+<script>
+    TheSys.main();
+</script>
 </body>
 </html>
