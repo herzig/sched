@@ -2,11 +2,23 @@ var Schedulers = {
     'FIFO': function () {
         this.prototype = new BaseScheduler();
         BaseScheduler.call(this);
+
+        this.queue = [];
         
-        this.schedule = function()
-        {
-            if (this.ready.length === 0) return;
-            this.run(this.ready[0]);
+        this.schedule = function() {
+            if (this.queue.length === 0) return null;
+            
+            return this.queue[0];
+        }
+
+        this.enqueue = function(proc) {
+            this.queue.push(proc)
+        }
+
+        this.dequeue = function(proc) {
+            var idx = this.queue.indexOf(proc);
+            if (idx > -1) 
+                this.queue.splice(idx,1);
         }
     },
 
@@ -14,54 +26,74 @@ var Schedulers = {
         this.prototype = new BaseScheduler();
         BaseScheduler.call(this);
        
-        this.currIndex = 0; // index into ready list.
+        this.queue = [];
 
         this.schedule = function() {
-           if (this.ready.length === 0) return;
+            if (this.queue.length === 0) return null;
 
-            // simply increment the index
-            this.currIndex = ++this.currIndex % this.ready.length;
+            var proc = this.queue[0];
 
-            this.run(this.ready[this.currIndex]);
+            this.queue.shift();
+            this.queue.push(proc);
+
+            return proc;
         };
+
+        this.enqueue = function(proc) {
+            this.queue.push(proc)
+        }
+
+        this.dequeue = function(proc) {
+            var idx = this.queue.indexOf(proc);
+            if (idx > -1) 
+                this.queue.splice(idx,1);
+        }
     },
 
     'FAIR': function() {
         this.prototype = new BaseScheduler();
         BaseScheduler.call(this);
 
-        // minmal runtime from all procs, monotonically increasing because we set it
-        // on every newly spawned process (set min_vruntime in CFS')
+        this.queue = []; // in CFS: an RB-Tree
+
+        // minmal runtime from all procs, monotonically increasing
+        // we set in on every newly spawned process (set min_vruntime in CFS')
         this.mintime = 0;
 
+        this.schedule = function() {
+            if (this.queue.length === 0) return;
+
+            // find the process with the smallest time (O(n))
+            var next;
+            if (this.running == null || this.running.state == 'BLOCKED')
+                next = this.queue[0];
+            else
+                next = this.running
+
+            for (var i = 0; i < this.queue.length; ++i) {
+                if (this.queue[i].time < next.time)
+                    next = this.queue[i];
+            }
+            // update the schedulers mintime
+            this.mintime = next.time;
+
+            return next;
+        };
+
         this.enqueue = function(proc) {
-            this.prototype.enqueue.call(this, proc);
+            this.queue.push(proc);
 
             // set new processes vruntime to the minimum runtime in the queue,
             // this makes sure that the new process is run next (or at least very soon
             // if there are duplicate times...)
-            proc.time = this.mintime;
+            proc.time = this.mintime-1;
         }
 
-        this.schedule = function() {
-            if (this.ready.length === 0) return;
-
-            // find the process with the smallest time (O(n))
-            if (this.running == null || this.running.state == 'WAIT')
-                nextprocess = this.ready[0];
-            else
-                nextprocess = this.running
-
-            for (var i = 0; i < this.ready.length; ++i) {
-                if (this.ready[i].time < nextprocess.time)
-                    nextprocess = this.ready[i];
-            }
-            // update the schedulers mintime
-            this.mintime = nextprocess.time;
-
-            // run process 
-            this.run(nextprocess);
-        };
+        this.dequeue = function(proc) {
+            var idx = this.queue.indexOf(proc);
+            if (idx > -1) 
+                this.queue.splice(idx,1);
+        }
     }
 }
 
@@ -70,96 +102,60 @@ function BaseScheduler() {
 
     this.all = []; // list of all processes
     this.ready = []; // keeps track of ready processes
-    this.waiting = []; // keeps track of waiting processes
 
     this.running = null; // the running process
     this.lastpid = 0;
     
     this.step = function() {
-        this.pollStates();
         ++this.clock;
 
-        this.schedule()
+        for (var i = 0; i < this.all.length; ++i) {
+            var proc = this.all[i];
+
+            var prevState = proc.state;
+            proc.updateState();
+
+            if (proc.state == 'DONE')
+                this.dequeue(proc);
+                
+            if (prevState == 'RUN' && proc.state == 'BLOCKED')
+                this.dequeue(proc);
+
+            if (proc.state == 'READY' && prevState != 'READY' && prevState != 'RUN')
+                this.enqueue(proc);
+        }
+
+        this.running = this.schedule();
+        if (this.running != null)
+            this.running.run();
     }
 
     this.spawn = function(numQuanta, cpuutil) {
         var proc = new Process(++this.lastpid, numQuanta, 'READY', cpuutil);
+        for (var i = 0; i < this.clock; ++i)
+            proc.history.push('');
+
         this.all.push(proc);
         this.enqueue(proc);
         return proc;
     }
 
-    this.enqueue = function(proc) {
-        if (proc.state != 'READY') throw 'Not allowed when not in READY state';
-
-        // remove from waiting queue
-        if ((i = this.waiting.indexOf(proc)) >= 0) {
-            this.waiting.splice(i,1);
-        }
-
-        if (this.ready.indexOf(proc) < 0) {
-            this.ready.push(proc);
-        }
+    // called when a process becomes ready to run
+    this.enqueue = function(proc) { 
+        throw 'enqueue() not implemented'
     }
 
-    this.remove = function(proc) {
-        if ((idx = this.ready.indexOf(proc)) >= 0)
-            this.ready.splice(idx,1);
-        if ((idx = this.waiting.indexOf(proc)) >= 0)
-            this.waiting.splice(idx,1);
-    }
-
-    // runs the specified process for one quantum and keeps track of its state
-    this.run = function(proc) {
-        if (proc.state != 'READY') throw 'Not allowed when not in READY state';
-
-        this.running = proc;
-        proc.run();
-
-        if (proc.state === 'DONE') { // remove from proc list
-            this.remove(proc);
-        }
-    }
-
-    // polls all sleepers and checks if they are still sleeping or enqueue for scheduling.
-    this.pollStates = function () {
-
-        for (var i = 0; i < this.all.length; ++i) {
-            var proc = this.all[i];
-            var before = proc.state;
-
-            proc.updateState();
-            if (before === proc.state) continue;
-
-            if (proc.state === 'WAIT') {
-                if (this.waiting.indexOf(proc) < 0)
-                    this.waiting.push(proc);
-
-                var idx = this.ready.indexOf(proc);
-                if (idx >= 0)
-                    this.ready.splice(idx,1);    
-            }
-            else if (proc.state === 'READY') {
-                this.enqueue(proc);
-            }
-        }
+    // called when a running tasks enters the BLOCKED state
+    this.enqueue = function(proc) { 
+        throw 'dequeue() not implemented'
     }
 
     // overwrite this in your scheduler implementation
-    this.schedule = function() { throw 'schedule() not implemented' } 
+    this.schedule = function() { 
+        throw 'schedule() not implemented' 
+    } 
 }
 
-
-// wraps the specified values in the specifed markup tags and returns the resulting string
-// values: array of values
-// element: markup element string ('td')
-function wrapInTags(values, element) {
-    var result = '';
-    for (var i = 0; i < values.length; ++i) {
-        result += '<' + element + '>' + values[i] + '</' + element + '>';
-    }
-    return result;
-}
 
 // specifies a process in the simulation
 // pid: the process id for the new process.
@@ -167,8 +163,10 @@ function Process(pid, quanta, state, cpuutil) {
     this.pid = pid; // unique process id
     this.time = 0; // virtual time consumed by this process (quantas executed)
     this.quanta = quanta; // number of quanta in this process (<0 means the process never stops).
-    this.state = state; // possible states: 'READY', 'BLOCKED', 'DONE'
+    this.state = state; // possible states: 'READY', 'BLOCKED', 'DONE', 'RUN'
     this.cpuutil = cpuutil;
+
+    this.history = [];
 
     // the process is finished when the instruction pointer points after the last quantum.
     this.isFinished = function () { return this.time >= this.quanta.length; }
@@ -177,23 +175,59 @@ function Process(pid, quanta, state, cpuutil) {
     // each quantum is 'atomic'. preempting the process is only possible between
     // steps.
     this.run = function () {
-
-        if (this.time >= this.quanta)
-            this.state = 'DONE';
-           
+        this.state = 'RUN';
         ++this.time;
     }
 
     // update process state based on the probability set in cpuutil
     this.updateState = function() {
-        if (state === 'DONE') return;
-        
-        if (Math.random() > this.cpuutil)
-            this.state = 'WAIT';
-        else if (this.state === 'WAIT')
+        this.history.push(this.state);
+
+        if (this.state === 'DONE') 
+            return;
+
+        if (this.time >= this.quanta) {
+            this.state = 'DONE';
+            return;
+        }
+
+        if (this.state == 'BLOCKED' && Math.random() < this.cpuutil) {
             this.state = 'READY';
-          
+            return;
+        }
+
+        if (this.state == 'RUN') {
+            if (Math.random() > this.cpuutil) {
+                this.state = 'BLOCKED';
+            }
+            else {
+                this.state = 'READY'
+            }
+            return;
+        }
+                  
     }
+}
+
+
+
+// wraps the specified values in the specifed markup tags and returns the resulting string
+// values: array of values
+// element: markup element string ('td')
+function wrapInTags(values, element) {
+    var result = '';
+    for (var i = 0; i < values.length; ++i) {
+        result += '<' + element + ' class="'+values[i]+'">' + values[i] + '</' + element + '>';
+    }
+    return result;
+}
+
+function buildHistoryTags(values, element) {
+     var result = '';
+    for (var i = 0; i < values.length; ++i) {
+        result += '<' + element + ' class="'+values[i]+'">&nbsp;&nbsp;</' + element + '>';
+    }
+    return result;   
 }
 
 var TheSys =
@@ -212,10 +246,23 @@ var TheSys =
         for (var i = 0; i < procs.length; ++i) {
             var p = procs[i];
             var cells = wrapInTags([p.pid, p.time, p.quanta, p.state, p.cpuutil], 'td');
+
             var cssclass = p === this.scheduler.running ? 'active' : ''
 
             $('#processes > tbody').append('<tr class="' + cssclass + '">' + cells + '</tr>');
         }
+
+        $("#history > tbody").empty();
+        for (var i = 0; i < procs.length; ++i) {
+            var p = procs[i];
+            var cells = buildHistoryTags(p.history, 'td');
+
+            var cssclass = p === this.scheduler.running ? 'active' : ''
+
+            $('#history').append('<tr class="' + cssclass + '">' + cells + '</tr>');
+        }
+
+        $("#historydiv").scrollLeft($("#historydiv")[0].scrollWidth);
     },
 
     start: function () {
@@ -244,8 +291,9 @@ var TheSys =
     },
 
     main: function () {
-        this.spawnEditor = new FunctionEditor("spawnEditor", "spawnError");
-        this.schedEditor = new FunctionEditor("schedEditor", "schedError");
+        this.editor = ace.edit("source");
+        this.editor.setTheme("ace/theme/chrome");
+        this.editor.getSession().setMode("ace/mode/javascript");
 
         this.changestrategy();
     },
