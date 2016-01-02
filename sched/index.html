@@ -50,7 +50,7 @@
         Quanta: <input type="number" id="numQuanta" value="-1"/> (<0: infinity)
     </p>
     <p>
-        CPU Utilisation: <input type="number" id="cpuutil" min="0" max="1" value="0.1"/> [0(always sleep),1(never sleep)]
+        CPU Utilisation: <input type="number" id="cpuutil" min="0" max="1" value="1.0"/> [0(always block),1(never block)]
     </p>
     <input type="submit" value="Spawn" onclick='TheSys.spawn()' />
 </div>
@@ -75,10 +75,6 @@
     <table id="history"><thead><tr><th>&nbsp;&nbsp;</th></tr></thead></table>
 </div>
 
-<div id="source">
-</div>
-
-<script src="ace/ace.js" type="text/javascript"></script>
 <script>
     TheSys.main();
 </script>

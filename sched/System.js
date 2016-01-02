@@ -12,6 +12,10 @@ var Schedulers = {
         }
 
         this.enqueue = function(proc) {
+			if (this.queue.length == 0) {
+				proc.state = 'RUN';
+				this.running = proc;
+			}
             this.queue.push(proc)
         }
 
@@ -40,7 +44,11 @@ var Schedulers = {
         };
 
         this.enqueue = function(proc) {
-            this.queue.push(proc)
+			if (this.queue.length == 0) {
+				proc.state = 'RUN';
+				this.running = proc;
+			}
+            this.queue.unshift(proc)
         }
 
         this.dequeue = function(proc) {
@@ -58,12 +66,13 @@ var Schedulers = {
 
         // minmal runtime from all procs, monotonically increasing
         // we set in on every newly spawned process (set min_vruntime in CFS')
-        this.mintime = 0;
+        this.minvtime = 0;
 
         this.schedule = function() {
             if (this.queue.length === 0) return;
 
-            // find the process with the smallest time (O(n))
+            // find the process with the smallest time (linear search O(n))
+			// in CFS this is done in O(1) on the time-ordered RB-Tree
             var next;
             if (this.running == null || this.running.state == 'BLOCKED')
                 next = this.queue[0];
@@ -71,22 +80,26 @@ var Schedulers = {
                 next = this.running
 
             for (var i = 0; i < this.queue.length; ++i) {
-                if (this.queue[i].time < next.time)
+                if (this.queue[i].vtime < next.vtime)
                     next = this.queue[i];
             }
             // update the schedulers mintime
-            this.mintime = next.time;
+            this.minvtime = ++next.vtime;
 
             return next;
         };
 
         this.enqueue = function(proc) {
-            this.queue.push(proc);
+			if (queue.length == 0) {
+				proc.state = 'RUN';
+				this.running = proc;
+			}
+			this.queue.push(proc);
 
             // set new processes vruntime to the minimum runtime in the queue,
             // this makes sure that the new process is run next (or at least very soon
             // if there are duplicate times...)
-            proc.time = this.mintime-1;
+            proc.vtime = this.minvtime-1;
         }
 
         this.dequeue = function(proc) {
@@ -101,11 +114,12 @@ function BaseScheduler() {
     this.clock = 0; // elapsed total time since birth
 
     this.all = []; // list of all processes
-    this.ready = []; // keeps track of ready processes
 
     this.running = null; // the running process
-    this.lastpid = 0;
+    this.lastpid = 0; // last assigend process id, monotonically increasing
     
+	// move simulation forward by one step
+	// handles process state changes and runs the selected scheduler strategy
     this.step = function() {
         ++this.clock;
 
@@ -115,6 +129,7 @@ function BaseScheduler() {
             var prevState = proc.state;
             proc.updateState();
 
+			// handle all state changes
             if (proc.state == 'DONE')
                 this.dequeue(proc);
                 
@@ -130,6 +145,10 @@ function BaseScheduler() {
             this.running.run();
     }
 
+	// spawns a new  task on this scheduler
+	// numQuanta: task duration, <0 for infinity
+	// cpuutil: cpu utilisation [0..1], 
+	//          the inverse probability that the task enters blocked state after each step.
     this.spawn = function(numQuanta, cpuutil) {
         var proc = new Process(++this.lastpid, numQuanta, 'READY', cpuutil);
         for (var i = 0; i < this.clock; ++i)
@@ -145,20 +164,23 @@ function BaseScheduler() {
         throw 'enqueue() not implemented'
     }
 
-    // called when a running tasks enters the BLOCKED state
-    this.enqueue = function(proc) { 
+    // called when a running tasks enters the BLOCKED or DONE state
+    this.dequeue = function(proc) { 
         throw 'dequeue() not implemented'
     }
 
-    // overwrite this in your scheduler implementation
+    // the main scheduler method, must return the selected running task.
     this.schedule = function() { 
         throw 'schedule() not implemented' 
     } 
 }
 
 
-// specifies a process in the simulation
+// a single process/task in the simulation
 // pid: the process id for the new process.
+// quanta: duration of tasks, <0 for infinity
+// state: task state a creation time
+// cpuutil: cpu utilisation of the task
 function Process(pid, quanta, state, cpuutil) {
     this.pid = pid; // unique process id
     this.time = 0; // virtual time consumed by this process (quantas executed)
@@ -179,7 +201,7 @@ function Process(pid, quanta, state, cpuutil) {
         ++this.time;
     }
 
-    // update process state based on the probability set in cpuutil
+    // handle process state changes
     this.updateState = function() {
         this.history.push(this.state);
 
@@ -209,30 +231,10 @@ function Process(pid, quanta, state, cpuutil) {
     }
 }
 
-
-
-// wraps the specified values in the specifed markup tags and returns the resulting string
-// values: array of values
-// element: markup element string ('td')
-function wrapInTags(values, element) {
-    var result = '';
-    for (var i = 0; i < values.length; ++i) {
-        result += '<' + element + ' class="'+values[i]+'">' + values[i] + '</' + element + '>';
-    }
-    return result;
-}
-
-function buildHistoryTags(values, element) {
-     var result = '';
-    for (var i = 0; i < values.length; ++i) {
-        result += '<' + element + ' class="'+values[i]+'">&nbsp;&nbsp;</' + element + '>';
-    }
-    return result;   
-}
-
+// simulation environment GUI and event handling
 var TheSys =
 {
-    scheduler: null,
+    scheduler: null, // the current scheduler
 
     updateui: function () {
         // update clock
@@ -252,6 +254,7 @@ var TheSys =
             $('#processes > tbody').append('<tr class="' + cssclass + '">' + cells + '</tr>');
         }
 
+		// populate history table
         $("#history > tbody").empty();
         for (var i = 0; i < procs.length; ++i) {
             var p = procs[i];
@@ -262,6 +265,7 @@ var TheSys =
             $('#history').append('<tr class="' + cssclass + '">' + cells + '</tr>');
         }
 
+		// auto scroll to end of timeline
         $("#historydiv").scrollLeft($("#historydiv")[0].scrollWidth);
     },
 
@@ -291,10 +295,6 @@ var TheSys =
     },
 
     main: function () {
-        this.editor = ace.edit("source");
-        this.editor.setTheme("ace/theme/chrome");
-        this.editor.getSession().setMode("ace/mode/javascript");
-
         this.changestrategy();
     },
 
@@ -314,31 +314,27 @@ var TheSys =
 
         this.updateui();
     }
-
-
 }
 
-function FunctionEditor(element, errorElement)  {
-    this.editor = ace.edit(element);
-    this.editor.setTheme("ace/theme/chrome");
-    this.editor.getSession().setMode("ace/mode/javascript");
-    this.errorElement = ($("#"+errorElement));
 
-    this.lastRunning = null;
 
-    this.getFunction = function() {
-        var source = this.editor.getValue();
 
-        try {
-            var f = new Function(source);
-            this.lastRunning = f;
-            this.errorElement.text('Ok!')
-        } 
-        catch (ex) {
-            this.errorElement.text(ex);
-        }
-
-        return this.lastRunning;
+// wraps the specified values in the specifed markup tags and returns the resulting string
+// values: array of values
+// element: markup element string ('td')
+function wrapInTags(values, element) {
+    var result = '';
+    for (var i = 0; i < values.length; ++i) {
+        result += '<' + element + ' class="'+values[i]+'">' + values[i] + '</' + element + '>';
     }
+    return result;
+}
 
+// create empty [element]-tags with the values set as class
+function buildHistoryTags(values, element) {
+     var result = '';
+    for (var i = 0; i < values.length; ++i) {
+        result += '<' + element + ' class="'+values[i]+'">&nbsp;&nbsp;</' + element + '>';
+    }
+    return result;   
 }
