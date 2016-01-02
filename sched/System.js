@@ -72,7 +72,7 @@ var Schedulers = {
             if (this.queue.length === 0) return;
 
             // find the process with the smallest time (linear search O(n))
-			// in CFS this is done in O(1) on the time-ordered RB-Tree
+	    	// in CFS this is done in O(1) on the time-ordered RB-Tree
             var next;
             if (this.running == null || this.running.state == 'BLOCKED')
                 next = this.queue[0];
@@ -90,10 +90,11 @@ var Schedulers = {
         };
 
         this.enqueue = function(proc) {
-			if (queue.length == 0) {
+			if (this.queue.length === 0) {
 				proc.state = 'RUN';
 				this.running = proc;
 			}
+
 			this.queue.push(proc);
 
             // set new processes vruntime to the minimum runtime in the queue,
