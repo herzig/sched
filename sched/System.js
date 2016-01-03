@@ -59,6 +59,7 @@ var Schedulers = {
     },
 
     'FAIR': function() {
+		this.preemptionBias = 1;
         this.prototype = new BaseScheduler();
         BaseScheduler.call(this);
 
@@ -80,7 +81,7 @@ var Schedulers = {
                 next = this.running
 
             for (var i = 0; i < this.queue.length; ++i) {
-                if (this.queue[i].vtime < next.vtime)
+                if (this.queue[i].vtime < next.vtime - this.preemptionBias)
                     next = this.queue[i];
             }
             // update the schedulers mintime
@@ -98,9 +99,11 @@ var Schedulers = {
 			this.queue.push(proc);
 
             // set new processes vruntime to the minimum runtime in the queue,
-            // this makes sure that the new process is run next (or at least very soon
-            // if there are duplicate times...)
-            proc.vtime = this.minvtime-1;
+            // this makes sure that the new process is run next
+ 			if (proc.vtime == undefined)
+            	proc.vtime = this.minvtime - this.preemptionBias - 1 ;
+            else
+            	proc.vtime = Math.max(this.minvtime-this.preemptionBias,proc.vtime);
         }
 
         this.dequeue = function(proc) {
